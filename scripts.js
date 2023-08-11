@@ -1,20 +1,28 @@
 const Modal = {
-    open(){
-        // Abrir modal
-        // Adicionar a class active ao modal
+    open() {
         document
             .querySelector('.modal-overlay')
             .classList
             .add('active')
 
     },
-    close(){
-        // fechar o modal
-        // remover a class active do modal
+    close() {
         document
             .querySelector('.modal-overlay')
             .classList
             .remove('active')
+    },
+
+    editModal(index) {
+
+        transaction = Transaction.all[index]
+
+        Form.setValues(transaction, index);
+
+        document
+            .querySelector('.modal-overlay')
+            .classList
+            .toggle('active')
     }
 }
 
@@ -88,18 +96,40 @@ const Transaction = {
 
     total() {
         return Transaction.incomes() - Transaction.expenses();
+    },
+
+    editTransaction(transaction, index) {
+        Transaction.all[index] = transaction
+
+        App.reload();
     }
 }
 
 const DOM = {
     transactionsContainer: document.querySelector('#data-table tbody'),
+    row: null,
 
     addTransaction(transaction, index) {
         const tr = document.createElement('tr')
+        tr.draggable = true
+        tr.ondragstart = (event) => row = event.target;
+        tr.ondragover = (event) => DOM.DragOver(event) 
         tr.innerHTML = DOM.innerHTMLTransaction(transaction, index)
         tr.dataset.index = index
 
         DOM.transactionsContainer.appendChild(tr)
+    },
+
+    DragOver(event) {
+        var e = event;
+        e.preventDefault();
+
+        let children = Array.from(e.target.parentNode.parentNode.children);
+
+        if (children.indexOf(e.target.parentNode) > children.indexOf(row))
+            e.target.parentNode.after(row);
+        else
+            e.target.parentNode.before(row);
     },
 
     innerHTMLTransaction(transaction, index) {
@@ -109,26 +139,34 @@ const DOM = {
 
         var button;
 
-        if(transaction.type == 'pendencie') {
-            button = `
-            <td>
-            <img onclick="Transaction.commitPendencie(${index})" src="./assets/income.svg" alt="Efetuar pendencia">
-            </td>
-            `   
-         }else{
-            button = `
-            <td>
-            <img onclick="Transaction.remove(${index})" src="./assets/minus.svg" alt="Remover transação">
-            </td>
-            `   
-         }
-         
-         const html = `
-         <td class="description">${transaction.description}</td>
-         <td class="${CSSclass}">${amount}</td>
-         <td class="date">${transaction.date}</td>
-         ${button}
-         `
+        switch (transaction.period) {
+            case 'temp':
+                if (transaction.type == 'pendencie') {
+                    button = `<td>
+                    <img onclick="Transaction.commitPendencie(${index})" src="./assets/income.svg" alt="Efetuar pendencia">
+                    </td>`
+                } else {
+                    button = `<td>
+                    <img onclick="Transaction.remove(${index})" src="./assets/minus.svg" alt="Remover transação">
+                    </td>`
+                }
+                break;
+            case 'fixed':
+                button = `<td>
+                                
+                         </td>`
+                break;
+            default:
+                break;
+        }
+
+        const html = `
+                <td class="description">${transaction.description}</td>
+                <td class="${CSSclass}"> <p style="cursor: pointer;" onclick="Modal.editModal(${index})" id="inputAmount${index}">${amount}</p </td>
+                <td class="date">${transaction.date}</td>
+                ${button}`
+
+
         return html
     },
 
@@ -170,6 +208,9 @@ const Utils = {
         return `${splittedDate[2]}/${splittedDate[1]}/${splittedDate[0]}`
     },
 
+    formatPeriod(transactions) {
+    },
+
     formatCurrency(value) {
         const signal = Number(value) < 0 ? "-" : ""
 
@@ -190,30 +231,45 @@ const Form = {
     description: document.querySelector('input#description'),
     amount: document.querySelector('input#amount'),
     date: document.querySelector('input#date'),
+    period: document.querySelector('select#period'),
     type: document.querySelector('select#type'),
+    id: null,
 
     getValues() {
         return {
             description: Form.description.value,
             amount: Form.amount.value,
             date: Form.date.value,
+            period: Form.period.value,
             type: Form.type.value
         }
     },
 
+    setValues(transaction, index) {
+        var currentDate = new Date().toISOString().substring(0, 10);
+
+        Form.description.value = transaction.description
+        Form.amount.value = transaction.amount / 100,
+            Form.date.value = currentDate,
+            Form.period.value = transaction.period,
+            Form.type.value = transaction.type,
+            Form.id = index
+    },
+
     validateFields() {
-        const { description, amount, date, type } = Form.getValues()
+        const { description, amount, date, type, period } = Form.getValues()
         
         if( description.trim() === "" || 
             amount.trim() === "" || 
             type.trim() === "" || 
+            period.trim() === "" || 
             date.trim() === "" ) {
                 throw new Error("Por favor, preencha todos os campos")
         }
     },
 
     formatValues() {
-        let { description, amount, date, type } = Form.getValues()
+        let { description, amount, date, type, period } = Form.getValues()
         
         amount = Utils.formatAmount(amount)
 
@@ -223,7 +279,8 @@ const Form = {
             description,
             amount,
             date,
-            type
+            type,
+            period
         }
     },
 
@@ -231,7 +288,8 @@ const Form = {
         Form.description.value = ""
         Form.amount.value = ""
         Form.date.value = ""
-        Form.type.value = ""        
+        Form.type.value = ""   
+        Form.id = null     
     },
 
     submit(event) {
@@ -240,7 +298,10 @@ const Form = {
         try {
             Form.validateFields()
             const transaction = Form.formatValues()
-            Transaction.add(transaction)
+            if (Form.id == null)
+                Transaction.add(transaction)
+            else
+                Transaction.editTransaction(transaction, Form.id)
             Form.clearFields()
             Modal.close()
         } catch (error) {
@@ -250,7 +311,7 @@ const Form = {
 }
 
 const App = {
-    init() {
+    init() {       
         Transaction.all.forEach(DOM.addTransaction)
         
         DOM.updateBalance()

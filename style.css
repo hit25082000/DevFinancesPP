@@ -257,8 +257,6 @@ td.expense {
     position: relative;
     z-index: 1;
 }
-
-
 /* Form ===================== */
 #form {
     max-width: 500px;
@@ -268,13 +266,19 @@ td.expense {
     margin-top: 0;
 }
 
-input, #type {
+.modal input, .modal select {
     border: none;
     border-radius: 0.2rem;
 
     padding: 0.8rem;
 
     width: 100%;
+}
+
+.inputAmount {
+    border: none;
+    outline: none;
+    width: 100px;
 }
 
 .input-group {
@@ -319,3 +323,4 @@ footer {
         gap: 2rem;
     }
 }
+
