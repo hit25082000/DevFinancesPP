@@ -15,7 +15,7 @@ const Modal = {
 
     editModal(index) {
 
-        transaction = Transaction.all[index]
+        let transaction = Transaction.all[index]
 
         Form.setValues(transaction, index);
 
@@ -113,7 +113,8 @@ const DOM = {
         const tr = document.createElement('tr')
         tr.draggable = true
         tr.ondragstart = (event) => row = event.target;
-        tr.ondragover = (event) => DOM.DragOver(event) 
+        tr.ondragover = (event) => DOM.DragOver(event);
+        tr.ondragend = (event) => DOM.DragEnd(event);
         tr.innerHTML = DOM.innerHTMLTransaction(transaction, index)
         tr.dataset.index = index
 
@@ -130,6 +131,26 @@ const DOM = {
             e.target.parentNode.after(row);
         else
             e.target.parentNode.before(row);
+    },
+
+    DragEnd(event) {
+        var e = event;
+        e.preventDefault();
+
+        let children = Array.from(e.target.parentNode.children);
+
+        var newArrIndex = [];
+
+        children.forEach(e => {
+            const newIndex = e.getAttribute("data-index")
+
+            const memory = Transaction.all[newIndex];
+
+            newArrIndex.push(memory);
+        });
+
+        Transaction.all = newArrIndex;
+        App.reload()
     },
 
     innerHTMLTransaction(transaction, index) {
