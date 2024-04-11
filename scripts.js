@@ -1,3 +1,5 @@
+const db = firebase.firestore();
+
 const Modal = {
     open() {
         document
@@ -7,6 +9,8 @@ const Modal = {
 
     },
     close() {
+        Form.clearFields()
+
         document
             .querySelector('.modal-overlay')
             .classList
@@ -14,7 +18,17 @@ const Modal = {
     },
 
     editModal(index) {
+        let transaction = Transaction.all[index]
 
+        Form.setValues(transaction, index);
+
+        document
+            .querySelector('.modal-overlay')
+            .classList
+            .toggle('active')
+    },
+
+    relationModal(index) {
         let transaction = Transaction.all[index]
 
         Form.setValues(transaction, index);
@@ -26,41 +40,123 @@ const Modal = {
     }
 }
 
-const Storage = {
-    get() {
-        return JSON.parse(localStorage.getItem("dev.finances:transactions")) || []
+const Month = {
+    currentMonth: (new Date().getMonth() + 1 ),
+    currentYear: new Date().getFullYear(),
+    monthNames: [
+        "Janeiro", 
+        "Fevereiro", 
+        "Março", 
+        "Abril", 
+        "Maio", 
+        "Junho",
+        "Julho",
+        "Agosto", 
+        "Setembro", 
+        "Outubro", 
+        "Novembro",
+        "Dezembro"
+    ],
+
+    getCurrentDate(){
+        return this.currentMonth.toString()  + '-' + this.currentYear.toString()
     },
 
-    set(transactions) {
-        localStorage.setItem("dev.finances:transactions", JSON.stringify(transactions))
+    pastMonthTotal(){
+        this.currentMonth = db.collection("financy").doc((date.getMonth() - 1).toString()).get()
+    },
+
+    previousMonth(){
+        this.currentMonth--;
+        App.init()
+    },
+
+    nextMonth(){
+        this.currentMonth++;
+        App.init()
+    },
+
+    today(){
     }
 }
 
-const Transaction = {
-    all: Storage.get(),
+const Storage = {
+    async get(){
+        var storage = await db.collection("financy").doc(Month.getCurrentDate()).get()
+        if(storage.exists)
+            return storage.data().transactions;
+        
+        await this.setNextMonth()
+    },
 
-    add(transaction){
+    async set(transactions){
+        await db.collection("financy").doc(Month.getCurrentDate()).set({transactions})
+    },   
+
+    async setNextMonth(){
+        Month.currentMonth--;
+        var transactions = await  this.get();
+        Month.currentMonth++;
+        await db.collection("financy").doc(Month.getCurrentDate()).set({transactions})
+        App.init()
+    }   
+}
+
+const Transaction = {
+    all: [],
+
+    add(transaction) {
         Transaction.all.push(transaction)
 
-        App.reload()
+        App.save().then(()=>{
+            App.reload()
+        })
     },
 
     remove(index) {
         Transaction.all.splice(index, 1)
-
-        App.reload()
+        App.save().then(()=>{
+            App.reload()
+        })
     },
 
-    commitPendencie(index) {
+    addPendency(index) {
+        var transaction = {
+            description: Transaction.all[index].description + ' Walace',
+            amount: Transaction.all[index].amount / 2,
+            date: Utils.formatDate(new Date().toISOString().substring(0, 10)),
+            period: 'temp',
+            type: 'pendency',
+            id: null
+        }
+
+        Transaction.all.splice(index + 1, 0, transaction);
+
+        App.save().then(()=>{
+            App.reload()
+        })
+    },
+
+    reset(index) {
+        Transaction.all[index].amount = 0;
+
+        App.save().then(()=>{
+            App.reload()
+        })
+    },
+
+    commitPendency(index) {
         Transaction.all[index].type = 'income';
 
-        App.reload()
+        App.save().then(()=>{
+            App.reload()
+        })
     },
 
     incomes() {
         let income = 0;
         Transaction.all.forEach(transaction => {
-            if( transaction.type == 'income' ) {
+            if (transaction.type == 'income') {
                 income += transaction.amount;
             }
         })
@@ -70,7 +166,7 @@ const Transaction = {
     expenses() {
         let expense = 0;
         Transaction.all.forEach(transaction => {
-            if( transaction.type == 'expense' ) {
+            if (transaction.type == 'expense') {
                 expense += transaction.amount;
             }
         })
@@ -78,19 +174,19 @@ const Transaction = {
     },
 
     pendencies() {
-        let pendencie = 0;
+        let pendency = 0;
         Transaction.all.forEach(transaction => {
-            if( transaction.type == 'pendencie' ) {
-                pendencie += transaction.amount;
+            if (transaction.type == 'pendency') {
+                pendency += transaction.amount;
             }
         })
-        return pendencie;
+        return pendency;
     },
 
     totalPendencies() {
-        if(this.pendencies() == 0)
+        if (this.pendencies() == 0)
             return this.pendencies()
-    
+
         return this.total() + this.pendencies()
     },
 
@@ -101,13 +197,22 @@ const Transaction = {
     editTransaction(transaction, index) {
         Transaction.all[index] = transaction
 
-        App.reload();
+        App.save().then(()=>{
+            App.reload()
+        })
     }
 }
 
 const DOM = {
     transactionsContainer: document.querySelector('#data-table tbody'),
-    row: null,
+    currentDate: document.querySelector("#current-date"),
+    row: null,   
+
+    addTransactions(transactions) {
+        transactions.forEach( function (transaction, index){
+            DOM.addTransaction(transaction,index);
+       });
+    },
 
     addTransaction(transaction, index) {
         const tr = document.createElement('tr')
@@ -115,10 +220,47 @@ const DOM = {
         tr.ondragstart = (event) => row = event.target;
         tr.ondragover = (event) => DOM.DragOver(event);
         tr.ondragend = (event) => DOM.DragEnd(event);
+        tr.oncontextmenu = (event) => DOM.MenuContext(event);
         tr.innerHTML = DOM.innerHTMLTransaction(transaction, index)
+        tr.classList.add(`transaction`)
+        tr.classList.add(`${transaction.type}`)
         tr.dataset.index = index
 
         DOM.transactionsContainer.appendChild(tr)
+    },
+
+    MenuContext(event) {
+        var e = event;
+        e.preventDefault();
+
+        var id = e.target.parentNode.dataset.index || e.target.parentNode.parentNode.dataset.index;
+
+        let menu = document.createElement("div")
+        menu.id = "ctxmenu"
+        document.onmouseup = () => ctxmenu.outerHTML = ''
+        menu.innerHTML = `<div class="container-menu" style="top: ${e.pageY}px; left: ${e.pageX}px;">
+        <!-- code here -->
+        <div class="menu" >
+          <ul class="menu-list">
+            <li class="menu-item"><button class="menu-button" onmousedown="Modal.editModal(${id})"><i data-feather="edit-2"></i>Editar</button></li>
+          </ul>
+          <ul class="menu-list">
+            <li class="menu-item"><button class="menu-button menu-button--black"><i data-feather="circle"></i>No status<i data-feather="chevron-right"></i></button>
+            <ul class="menu-sub-list">
+              <li class="menu-item"><button class="menu-button menu-button--orange"><i data-feather="square"></i>Needs review</button></li>
+                      <li class="menu-item"><button class="menu-button menu-button--purple"><i data-feather="octagon"></i>In progress</button></li>
+                      <li class="menu-item"><button class="menu-button menu-button--green"><i data-feather="triangle"></i>Approved</button></li>
+                      <li class="menu-item"><button class="menu-button menu-button--black menu-button--checked"><i data-feather="circle"></i>No status<i data-feather="check"></i></button></li>
+            </ul>
+            </li>
+             <li class="menu-item"><button class="menu-button" style="color: #dc9960;" onmousedown="Transaction.addPendency(${id})">Criar pendencia</button></li>
+          </ul>
+          <ul class="menu-list">
+            <li class="menu-item"><button class="menu-button menu-button--delete" onmousedown="Transaction.remove(${id})"><i data-feather="trash-2"></i>Delete</button></li>
+          </ul>
+        </div>
+      </div>`
+        document.body.appendChild(menu)
     },
 
     DragOver(event) {
@@ -150,7 +292,7 @@ const DOM = {
         });
 
         Transaction.all = newArrIndex;
-        App.reload()
+        App.save();
     },
 
     innerHTMLTransaction(transaction, index) {
@@ -162,20 +304,20 @@ const DOM = {
 
         switch (transaction.period) {
             case 'temp':
-                if (transaction.type == 'pendencie') {
+                if (transaction.type == 'pendency') {
                     button = `<td>
-                    <img onclick="Transaction.commitPendencie(${index})" src="./assets/income.svg" alt="Efetuar pendencia">
+                    <img onclick="Transaction.commitPendency(${index})" src="./assets/income.svg" alt="Efetuar pendencia">
                     </td>`
                 } else {
                     button = `<td>
                     <img onclick="Transaction.remove(${index})" src="./assets/minus.svg" alt="Remover transação">
                     </td>`
                 }
-                break;
+                break;            
             case 'fixed':
                 button = `<td>
-                                
-                         </td>`
+                <img onclick="Transaction.reset(${index})" src="./assets/minus.svg" alt="Remover transação">
+                </td>`
                 break;
             default:
                 break;
@@ -183,10 +325,9 @@ const DOM = {
 
         const html = `
                 <td class="description">${transaction.description}</td>
-                <td class="${CSSclass}"> <p style="cursor: pointer;" onclick="Modal.editModal(${index})" id="inputAmount${index}">${amount}</p </td>
+                <td class="${CSSclass}"> <p style="cursor: pointer;" onclick="Modal.editModal(${index})" id="${index}">${amount}</p </td>
                 <td class="date">${transaction.date}</td>
                 ${button}`
-
 
         return html
     },
@@ -209,24 +350,93 @@ const DOM = {
             .innerHTML = Utils.formatCurrency(Transaction.totalPendencies())
     },
 
+    updateDate(){
+        this.currentDate.innerHTML = Utils.formatCurrentDate(Month.getCurrentDate());
+    },
+
     clearTransactions() {
         DOM.transactionsContainer.innerHTML = ""
+    },
+
+    orderTransactions(event){
+        var desc = 1,asc = -1
+
+        if(event.target.classList.value == 'desc'){
+            document.querySelectorAll('.desc').forEach(e => e.classList.remove("desc")) 
+            document.querySelectorAll('.asc').forEach(e => e.classList.remove("asc")) 
+            desc = 1,asc = -1
+            event.target.classList.add("asc");
+        }       
+        else if(event.target.classList.value == 'asc'){
+            document.querySelectorAll('.desc').forEach(e => e.classList.remove("desc")) 
+            document.querySelectorAll('.asc').forEach(e => e.classList.remove("asc")) 
+            desc = -1,asc = 1
+            event.target.classList.add("desc");
+        }else{
+            document.querySelectorAll('.desc').forEach(e => e.classList.remove("desc")) 
+            document.querySelectorAll('.asc').forEach(e => e.classList.remove("asc")) 
+            event.target.classList.add("desc");
+        }
+
+        switch(event.target.dataset.type){
+            case "Date":  
+                Transaction.all.sort((a, b) => Utils.unformatDate(a.date) < Utils.unformatDate(b.date) ? desc : asc);
+                App.save().then(()=>{
+                    App.reload();
+                })
+                break;
+            case "Description":  
+                Transaction.all.sort((a, b) => a.description > b.description ? desc : asc);
+                App.save().then(()=>{
+                    App.reload();
+                })
+                break;
+            case "Amount":
+                Transaction.all.sort((a,b) => a.amount < b.amount ? desc : asc);
+                App.save().then(()=>{
+                    App.reload();
+                })
+                break;
+        }
+    },
+
+    filterTransactions(event){
+        const filters = document.querySelectorAll('.checkbox-filter')
+
+        filters.forEach((filter) => {
+            if(filter.checked){
+                document.querySelectorAll(`.${filter.id}`).forEach(x => x.classList.remove('hidden'))
+            } 
+            if(!filter.checked){
+                var transactions = document.querySelectorAll(`.${filter.id}`)
+                transactions.forEach(x => x.classList.add('hidden'))
+        } 
+        })
     }
 }
 
 const Utils = {
-    formatAmount(value){
-        
+    formatAmount(value) {
         value = Number(value.replace(/\,\./g, "")) * 100
-        
+
         value = Math.round(value * 100) / 100
-        
+
         return value
     },
 
     formatDate(date) {
         const splittedDate = date.split("-")
         return `${splittedDate[2]}/${splittedDate[1]}/${splittedDate[0]}`
+    },
+
+    unformatDate(date) {
+        const splittedDate = date.split("/")
+        return new Date(splittedDate[2], Number(splittedDate[1]) -  1, splittedDate[0])
+    },
+
+    formatCurrentDate(date) {
+        var formatedDate = date.split('-');
+        return Month.monthNames[Number(formatedDate[0]) - 1] + "/" + formatedDate[1];
     },
 
     formatPeriod(transactions) {
@@ -244,7 +454,7 @@ const Utils = {
             currency: "BRL"
         })
 
-       return signal + value
+        return signal + value
     }
 }
 
@@ -279,19 +489,19 @@ const Form = {
 
     validateFields() {
         const { description, amount, date, type, period } = Form.getValues()
-        
-        if( description.trim() === "" || 
-            amount.trim() === "" || 
-            type.trim() === "" || 
-            period.trim() === "" || 
-            date.trim() === "" ) {
-                throw new Error("Por favor, preencha todos os campos")
+
+        if (description.trim() === "" ||
+            amount.trim() === "" ||
+            type.trim() === "" ||
+            period.trim() === "" ||
+            date.trim() === "") {
+            throw new Error("Por favor, preencha todos os campos")
         }
     },
 
     formatValues() {
         let { description, amount, date, type, period } = Form.getValues()
-        
+
         amount = Utils.formatAmount(amount)
 
         date = Utils.formatDate(date)
@@ -309,8 +519,8 @@ const Form = {
         Form.description.value = ""
         Form.amount.value = ""
         Form.date.value = ""
-        Form.type.value = ""   
-        Form.id = null     
+        Form.type.value = ""
+        Form.id = null
     },
 
     submit(event) {
@@ -332,17 +542,24 @@ const Form = {
 }
 
 const App = {
-    init() {       
-        Transaction.all.forEach(DOM.addTransaction)
-        
-        DOM.updateBalance()
+    async init() {
+        DOM.clearTransactions()
+        Transaction.all = await Storage.get()
 
-        Storage.set(Transaction.all)
+        DOM.addTransactions(Transaction.all)
+
+        DOM.updateBalance()
+        DOM.updateDate()
     },
+
     reload() {
         DOM.clearTransactions()
         App.init()
     },
+
+    async save(){
+        await Storage.set(Transaction.all)
+    }
 }
 
 App.init()
